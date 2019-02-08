@@ -118,17 +118,20 @@ function LoadConfig
 			echo "MINTEMP must be less than MAXTEMP" >&2
 			exit 1
 		fi
-		if [ "${AFCMAXPWM[$fcvcount]}" -gt 255 ]
+		if [ "${AFCMAXPWM[$fcvcount]}" != full ]
 		then
-			echo "Error in configuration file (${AFCPWM[$fcvcount]}):" >&2
-			echo "MAXPWM must be at most 255" >&2
-			exit 1
-		fi
-		if [ "${AFCMINSTOP[$fcvcount]}" -ge "${AFCMAXPWM[$fcvcount]}" ]
-		then
-			echo "Error in configuration file (${AFCPWM[$fcvcount]}):" >&2
-			echo "MINSTOP must be less than MAXPWM" >&2
-			exit 1
+			if [ "${AFCMAXPWM[$fcvcount]}" -gt 255 ]
+			then
+				echo "Error in configuration file (${AFCPWM[$fcvcount]}):" >&2
+				echo "MAXPWM must be at most 255" >&2
+				exit 1
+			fi
+			if [ "${AFCMINSTOP[$fcvcount]}" -ge "${AFCMAXPWM[$fcvcount]}" ]
+			then
+				echo "Error in configuration file (${AFCPWM[$fcvcount]}):" >&2
+				echo "MINSTOP must be less than MAXPWM" >&2
+				exit 1
+			fi
 		fi
 		if [ "${AFCMINSTOP[$fcvcount]}" -lt "${AFCMINPWM[$fcvcount]}" ]
 		then
@@ -523,7 +526,7 @@ function UpdateFanSpeeds
 	local fcvcount
 	local pwmo tsens fan mint maxt minsa minso minpwm maxpwm
 	local tval tlastval pwmpval fanval min_fanval one_fan one_fanval
-	local -i pwmval
+	local pwmval
 
 	let fcvcount=0
 	while (( $fcvcount < ${#AFCPWM[@]} )) # go through all pwm outputs
@@ -626,7 +629,12 @@ function UpdateFanSpeeds
 		  then pwmval=$maxpwm # over max temp, use defined max pwm
 		else
 		  # calculate the new value from temperature and settings
-		  pwmval="(${tval}-${mint})*(${maxpwm}-${minso})/(${maxt}-${mint})+${minso}"
+		  if [ "$maxpwm" = full ]
+		  then
+		  	pwmval=$(((${tval}-${mint})*(255-${minso})/(${maxt}-${mint})+${minso}))
+		  else
+		  	pwmval=$(((${tval}-${mint})*(${maxpwm}-${minso})/(${maxt}-${mint})+${minso}))
+		  fi
 		  if [ $pwmpval -eq 0 -o $min_fanval -eq 0 ]
 		  then # if fan was stopped start it using a safe value
 		  	echo $minsa > $pwmo
@@ -635,6 +643,24 @@ function UpdateFanSpeeds
 			wait
 		  fi
 		fi
+		if [ "$pwmval" = full ]
+		then
+			pwmval=255
+			if [ -f ${pwmo}_enable ]
+			then
+				echo 0 > ${pwmo}_enable # set fan to full speed
+				if [ $? -eq 0 ]
+				then
+					if [ "$DEBUG" != "" ]
+					then
+						echo "new enable=0"
+					fi
+					let fcvcount=$fcvcount+1
+					continue
+				fi
+			fi
+		fi
+		echo 1 > ${pwmo}_enable # set fan to manual control
 		echo $pwmval > $pwmo # write new value to pwm output
 		if [ $? -ne 0 ]
 		then
